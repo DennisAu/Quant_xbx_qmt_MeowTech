@@ -2067,13 +2067,21 @@ class MainWindow(QMainWindow):
         system_layout.addWidget(self.startup_btn)
 
         shutdown_system_btn = QPushButton("立即关机")
-        shutdown_system_btn.clicked.connect(lambda: Worker(self.core_logic.shutdown_system_now).start())
+        shutdown_system_btn.clicked.connect(self.confirm_shutdown)
         system_layout.addWidget(shutdown_system_btn)
 
         system_group.setLayout(system_layout)
         return system_group
     
+    def confirm_shutdown(self):
+        """显示关机确认对话框"""
+        reply = QMessageBox.question(self, '确认操作',
+                                     "您确定要立即关机吗？\n\n请确保所有工作已保存。",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
+        if reply == QMessageBox.Yes:
+            # User confirmed, proceed with shutdown
+            Worker(self.core_logic.shutdown_system_now).start()
 
     def create_config_page(self):
         """创建配置页面"""
