@@ -1490,34 +1490,82 @@ class ScheduleManager:
             return False
 
     @async_operation("data_cleanup")
-    def _delete_early_market_data(self):
-        """删除早盘数据"""
-        try:
-            self.status_callback("正在删除早盘数据...")
+    def delete_early_market_data(self):
+        """删除早盘数据（只删除文件夹内容，保留文件夹结构）"""
+        log("开始清理早盘数据...")
+        cleaned_folders = []
+        failed_folders = []
 
-            data_manager = DataManager(
-                self.config.get('delete_base_path'),
-                self.config.get('delete_folders')
-            )
-
-            # 注册大对象到内存管理器
-            if hasattr(self, 'memory_manager'):
-                self.memory_manager.register_large_object(data_manager)
-
-            deleted_folders, failed_folders = data_manager.delete_early_market_data()
-
-            if not failed_folders:
-                self.status_callback("早盘数据删除成功！")
+        for folder_name in self.folder_names:
+            folder_path = os.path.join(self.base_path, folder_name)
+            try:
+                if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                    # 文件夹存在，清空内容但保留文件夹
+                    items_to_delete = []
+                    failed_items = []
+                    
+                    # 先列出所有要删除的项目
+                    try:
+                        items_to_delete = os.listdir(folder_path)
+                    except Exception as e:
+                        log(f"无法读取文件夹内容 {folder_path}: {e}")
+                        failed_folders.append((folder_name, f"无法读取文件夹内容: {str(e)}"))
+                        continue
+                    
+                    # 逐一删除文件夹内的内容
+                    for item in items_to_delete:
+                        item_path = os.path.join(folder_path, item)
+                        try:
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path)
+                                log(f"删除子文件夹: {item_path}")
+                            else:
+                                os.remove(item_path)
+                                log(f"删除文件: {item_path}")
+                        except Exception as e:
+                            failed_items.append(f"{item}: {str(e)}")
+                            log(f"删除文件/文件夹 {item_path} 时出错: {e}")
+                    
+                    if failed_items:
+                        failed_folders.append((folder_name, f"部分内容删除失败: {'; '.join(failed_items)}"))
+                        log(f"文件夹 {folder_path} 部分内容清理失败")
+                    else:
+                        cleaned_folders.append(folder_name)
+                        log(f"成功清空文件夹内容: {folder_path}")
+                        
+                elif os.path.exists(folder_path) and not os.path.isdir(folder_path):
+                    # 路径存在但不是文件夹
+                    failed_folders.append((folder_name, "路径存在但不是文件夹"))
+                    log(f"路径 {folder_path} 存在但不是文件夹")
+                else:
+                    # 文件夹不存在，创建空白文件夹
+                    os.makedirs(folder_path, exist_ok=True)
+                    cleaned_folders.append(folder_name)
+                    log(f"成功创建空白文件夹: {folder_path}")
+                    
+            except Exception as e:
+                failed_folders.append((folder_name, str(e)))
+                log(f"处理文件夹 {folder_path} 时出错: {e}")
+        
+        # 最终检查：确保所有目标文件夹都存在（防御性编程）
+        log("执行最终文件夹检查...")
+        for folder_name in self.folder_names:
+            folder_path = os.path.join(self.base_path, folder_name)
+            if not os.path.exists(folder_path):
+                try:
+                    os.makedirs(folder_path, exist_ok=True)
+                    log(f"最终检查：重新创建文件夹 {folder_path}")
+                    # 如果之前没有成功记录，现在补充记录
+                    if folder_name not in cleaned_folders:
+                        cleaned_folders.append(folder_name)
+                except Exception as e:
+                    log(f"最终检查：创建文件夹失败 {folder_path}: {e}")
+                    if folder_name not in [item[0] for item in failed_folders]:
+                        failed_folders.append((folder_name, f"最终检查创建失败: {str(e)}"))
             else:
-                self.status_callback(f"部分数据删除失败: {failed_folders}")
-
-        except Exception as e:
-            log(f"数据删除过程中发生错误: {e}")
-            self.status_callback(f"数据删除失败: {e}")
-        finally:
-            # 执行内存清理
-            if hasattr(self, 'memory_manager'):
-                self.memory_manager.cleanup_if_needed()
+                log(f"最终检查：文件夹已存在 {folder_path}")
+        
+        return cleaned_folders, failed_folders
 
     def _shutdown_qmt(self):
         """关闭QMT - 优化版"""
